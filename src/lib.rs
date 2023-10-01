@@ -5,6 +5,8 @@ use crate::gifparser::GifParser;
 
 pub mod gifparser;
 
+const OUTPUT_ENABLED: bool = true;
+
 #[derive(Debug)]
 pub enum Error {
     GifError(&'static str),
@@ -95,20 +97,34 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                 // be there...
                 // that doesn't work if some block just happens to have data that looks like a header.
 
+                // image lib is "guessing", I think it will accept some padding before the GIF
+                // header appears, so it isn't at the front of the buffer at this index?
+                const GIF_HEADER: [u8; 4] = *b"GIF8";
+                if !&bytes[i..].starts_with(&GIF_HEADER) {
+                    continue; // so ignore until we actually get to the header
+                }
                 // TODO handle when GIF not parsed properly (still want to continue w/ rest of file)
-                find_and_write_gif(&bytes, i, format!("{}/{}.gif", output_folder, num_images))?;
+                // if num_images == 345 {
+                if let Err(e) =
+                    find_and_write_gif(&bytes, i, format!("{}{}.gif", output_folder, num_images))
+                {
+                    println!("Encountered error at image {}: {:?}", num_images, e)
+                }
+                // }
                 num_images += 1;
             } else if let Ok(img) = image::load_from_memory_with_format(&bytes[i..], format) {
-                img.save_with_format(
-                    format!(
-                        "{}/{}.{}",
-                        output_folder,
-                        num_images,
-                        format.extensions_str()[0]
-                    ),
-                    format,
-                )
-                .expect("image should save properly");
+                if OUTPUT_ENABLED {
+                    img.save_with_format(
+                        format!(
+                            "{}/{}.{}",
+                            output_folder,
+                            num_images,
+                            format.extensions_str()[0]
+                        ),
+                        format,
+                    )
+                    .expect("image should save properly");
+                }
                 num_images += 1;
             }
         }
@@ -164,20 +180,23 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
 }
 
 fn find_and_write_gif(bytes: &[u8], index: usize, filename: String) -> Result<(), Error> {
+    println!("Writing {}", &filename);
     let start_idx = index;
     let mut parser = GifParser::new();
     let blocks = parser
-        .parse_gif_from_bytes(bytes)
+        .parse_gif_from_bytes(&bytes[start_idx..])
         .map_err(|err| Error::GifError(err.message))?;
-    let end_idx = (blocks.last().unwrap().index + blocks.last().unwrap().size) as usize;
+    let end_idx = start_idx + (blocks.last().unwrap().index + blocks.last().unwrap().size) as usize;
 
-    let mut manual_output_file =
-        fs::File::create(filename).expect("should be able to create a file");
+    if OUTPUT_ENABLED {
+        let mut manual_output_file =
+            fs::File::create(&filename).expect("should be able to create a file");
 
-    manual_output_file
-        .write_all(&bytes[start_idx..end_idx]) // +1 to include the trailer byte
-        .expect("should be able to write segement to disk");
+        manual_output_file
+            .write_all(&bytes[start_idx..end_idx]) // +1 to include the trailer byte
+            .expect("should be able to write segement to disk");
+    }
 
-    println!("GIF ended after {} bytes", end_idx - start_idx);
+    println!("Wrote {} bytes", end_idx - start_idx);
     Ok(())
 }

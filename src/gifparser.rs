@@ -1,6 +1,9 @@
 /// A parser for GIF format, but for my use case just gets the starting indices and lengths of blocks
 /// See https://www.w3.org/Graphics/GIF/spec-gif89a.txt
 
+const SIZE_BYTES_MASK: u8 = 0x07;
+const FIRST_BIT_MASK: u8 = 0x80;
+
 #[derive(Debug)]
 pub struct GifParseError {
     pub message: &'static str,
@@ -55,17 +58,13 @@ impl<'a> GifParser<'a> {
         // check for global color table
         // on most modern systems casting to usize shouldn't lose data
         let logical_packed_byte = bytes[(self.blocks.last().unwrap().index + 4) as usize];
-        if (logical_packed_byte & 0x80) != 0 {
+        if (logical_packed_byte & FIRST_BIT_MASK) != 0 {
             // global color table flag is set to true
-            let global_color_table_size = logical_packed_byte & 0x07; // number of entries
+            let global_color_table_size = logical_packed_byte & SIZE_BYTES_MASK; // number of entries
 
             // spec says 3 x 2^(Size of Global Color Table+1), since we are right shifting
             // value 2 already it already has implicit 2^1 so subtract 1 from that
             let global_color_table_bytes = 3 * (2 << (global_color_table_size));
-            println!(
-                "Global color table size {} bytes and cur index is {}",
-                global_color_table_bytes, self.cur_index
-            );
 
             // parse global color table
             self.parse_color_table(global_color_table_bytes)?;
@@ -76,8 +75,8 @@ impl<'a> GifParser<'a> {
         // , for image descriptor and subsequent image data
         // and ; the trailing byte
         loop {
-            println!("current index {}", self.cur_index);
-            match bytes[self.cur_index as usize] {
+            let idx = self.cur_index as usize;
+            match bytes[idx] {
                 b'!' => {
                     // 0x21
                     self.parse_extension()?;
@@ -90,9 +89,9 @@ impl<'a> GifParser<'a> {
                     // if the local color table bit was set, parse local color table
                     let image_descriptor_packed_byte =
                         self.bytes[(self.blocks.last().unwrap().index + 9) as usize];
-                    if image_descriptor_packed_byte & 0x80 != 0 {
+                    if image_descriptor_packed_byte & FIRST_BIT_MASK != 0 {
                         // local color table exists
-                        let local_color_table_size = logical_packed_byte & 0x06; // number of entries
+                        let local_color_table_size = logical_packed_byte & SIZE_BYTES_MASK; // number of entries
 
                         // see above when getting size of global color table
                         let local_color_table_bytes = 3 * (2 << (local_color_table_size));
@@ -110,10 +109,19 @@ impl<'a> GifParser<'a> {
                     self.parse_trailer()?;
                     break;
                 }
-                byte => panic!(
-                    "encountered GIF byte {:x?} that isn't a block starter! blocks so far {:?}",
-                    byte, self.blocks
-                ),
+                0x0 => {
+                    self.cur_index += 1;
+                    continue;
+                } // people be adding weird padding sometimes?
+                byte => {
+                    println!(
+                    "encountered GIF byte {:x?} that isn't a block starter! blocks so far {:?}\n Index {} surrounding bytes {:x?}",
+                    byte, self.blocks, idx, &self.bytes[(idx - 16)..(idx + 16)]
+                    );
+                    return Err(GifParseError {
+                        message: "Invalid bytes in GIF",
+                    });
+                }
             };
         }
 
@@ -125,6 +133,7 @@ impl<'a> GifParser<'a> {
         const GIF_HEADER: [u8; 4] = *b"GIF8";
         const HEADER_LEN: u32 = 6;
         if !self.bytes.starts_with(&GIF_HEADER) {
+            println!("{:x?}", &self.bytes[0..16]);
             return Err(GifParseError::new("Invalid GIF header bytes"));
         }
         self.blocks.push(Block {
@@ -165,6 +174,10 @@ impl<'a> GifParser<'a> {
     /// data set in different ways.
     fn parse_extension(&mut self) -> Result<(), GifParseError> {
         if self.bytes[self.cur_index as usize] != 0x21 {
+            println!(
+                "{:x?}",
+                &self.bytes[(self.cur_index as usize - 8)..(self.cur_index as usize + 8)]
+            );
             return Err(GifParseError::new("Invalid extension block declaration"));
         }
         // Graphic control, plain text, and application extensions all have the format:
@@ -177,7 +190,9 @@ impl<'a> GifParser<'a> {
             0xF9 => {
                 // graphic control extension
                 // only block size
-                let block_size = self.bytes[idx + 2];
+                // let block_size = self.bytes[idx + 2];
+                let block_size = 4; // TODO I changed this to hardcoded since it is/should be fixed, but not sure about implication
+
                 // three extra bytes since introducer, label, and size aren't included in the size
                 3 + block_size as u32
             }
@@ -188,10 +203,16 @@ impl<'a> GifParser<'a> {
                 // extension introducer byte and label byte
                 2 + data_size
             }
-            0x01 | 0xFF => {
-                // plain text and application extension
+            0x01 => {
+                // plain text and application extension have
                 // block size for metadata and sub blocks with their own size
-                let metadata_size = self.bytes[idx + 2];
+                let metadata_size = 12;
+                let sub_blocks_start = idx + 3 + metadata_size as usize;
+                let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
+                3 + metadata_size as u32 + sub_blocks_size
+            }
+            0xFF => {
+                let metadata_size = 11;
                 let sub_blocks_start = idx + 3 + metadata_size as usize;
                 let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
                 3 + metadata_size as u32 + sub_blocks_size
@@ -208,7 +229,7 @@ impl<'a> GifParser<'a> {
         if self.bytes[self.cur_index as usize] != 0x0 {
             Err(GifParseError::new("Invalid extension block terminator"))
         } else {
-            self.cur_index += 1; // advance past block terminator
+            // self.cur_index += 1; // advance past block terminator
             Ok(())
         }
     }
@@ -231,10 +252,9 @@ impl<'a> GifParser<'a> {
 
     fn parse_image_data(&mut self) -> Result<(), GifParseError> {
         const LZW_MIN_CODE_SIZE_LEN: u32 = 1;
+
         let data_len = self.length_of_sub_blocks((self.cur_index + LZW_MIN_CODE_SIZE_LEN) as usize);
-        // if self.bytes[(self.cur_index + data_len) as usize] != 0x0 {
-        //     return Err(GifParseError::new("Invalid image data"));
-        // }
+
         self.blocks.push(Block {
             index: self.cur_index,
             size: data_len + LZW_MIN_CODE_SIZE_LEN,
@@ -247,7 +267,7 @@ impl<'a> GifParser<'a> {
                 "Invalid termination of image data blocks",
             ))
         } else {
-            self.cur_index += 1; // advance past block terminator
+            // self.cur_index += 1; // advance past block terminator
             Ok(())
         }
     }
@@ -261,9 +281,21 @@ impl<'a> GifParser<'a> {
         let mut num_bytes: u32 = 0;
 
         let mut block_len = self.bytes[index];
+        // if index > 3075080 && block_len == 12 {
+        //     println!("{}", block_len);
+        //     println!("!! {:x?}", &self.bytes[index - 16..index + 16]);
+        // }
         while block_len != 0 {
             num_bytes += 1 + block_len as u32; // add one to include the length byte as well
             block_len = self.bytes[index + (num_bytes as usize)];
+            // if index > 3075080 {
+            //     println!("{}", block_len);
+            //     println!(
+            //         "{:x?}",
+            //         &self.bytes
+            //             [index - 16 + (num_bytes as usize)..index + 16 + (num_bytes as usize)]
+            //     );
+            // }
         }
 
         num_bytes
