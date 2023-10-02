@@ -124,12 +124,12 @@ impl<'a> GifParser<'a> {
                     self.cur_index += 1;
                     continue;
                 } // people be adding weird padding sometimes?
-                byte => {
-                    println!(
-                    "encountered GIF byte {:x?} that isn't a block starter! blocks so far {}\n Index {} surrounding bytes {:x?}",
-                    byte, self.blocks.len(), idx, &self.bytes[(idx - 16)..(idx + 16)]
-                    );
-                    println!("{:#?}", self.blocks);
+                _byte => {
+                    // println!(
+                    // "encountered GIF byte {:x?} that isn't a block starter! blocks so far {}\n Index {} surrounding bytes {:x?}",
+                    // byte, self.blocks.len(), idx, &self.bytes[(idx - 16)..(idx + 16)]
+                    // );
+                    // println!("{:#?}", self.blocks);
                     return Err(GifParseError {
                         message: "Invalid bytes in GIF",
                     });
