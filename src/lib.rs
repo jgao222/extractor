@@ -1,4 +1,4 @@
-use image::ImageFormat;
+use image::{ImageError, ImageFormat};
 use std::{fs, io::Write};
 
 use crate::gifparser::GifParser;
@@ -53,16 +53,25 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                 num_images += 1;
             } else if let Ok(img) = image::load_from_memory_with_format(&bytes[i..], format) {
                 if OUTPUT_ENABLED {
-                    if let Err(e) = img.save_with_format(
-                        format!(
-                            "{}/{}.{}",
-                            output_folder,
-                            num_images,
-                            format.extensions_str()[0]
-                        ),
-                        format,
-                    ) {
-                        println!("Error when saving image: {}", e);
+                    let output_path = format!(
+                        "{}/{}.{}",
+                        output_folder,
+                        num_images,
+                        format.extensions_str()[0]
+                    );
+                    if let Err(e) = img.save_with_format(output_path, format) {
+                        // try saving it to png, since if we got here the image crate
+                        // was able to read the file, maybe just doesn't support writing it
+                        if let ImageError::Unsupported(_) = e {
+                            if let Err(e) = img.save_with_format(
+                                format!("{}/{}.png", output_folder, num_images),
+                                ImageFormat::Png,
+                            ) {
+                                println!("Error when saving image: {}", e);
+                            }
+                        } else {
+                            println!("Error when saving image: {}", e);
+                        }
                     }
                 }
                 num_images += 1;
