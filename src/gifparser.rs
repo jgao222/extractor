@@ -202,11 +202,11 @@ impl<'a> GifParser<'a> {
             0xF9 => {
                 // graphic control extension
                 // only block size
-                // let block_size = self.bytes[idx + 2];
-                let block_size = 4; // TODO I changed this to hardcoded since it is/should be fixed, but not sure about implication
+                // These can be hardcoded since they are fixed, but will require changing if GIF spec changes
+                const GCE_BLOCK_SIZE: u32 = 4;
 
                 // three extra bytes since introducer, label, and size aren't included in the size
-                (3 + block_size as u32, ExtensionType::GraphicControl)
+                (3 + GCE_BLOCK_SIZE, ExtensionType::GraphicControl)
             }
             0xFE => {
                 // comment data extension
@@ -216,27 +216,30 @@ impl<'a> GifParser<'a> {
                 (2 + data_size, ExtensionType::Comment)
             }
             0x01 => {
-                // plain text and application extension have
+                // plain text extension
                 // block size for metadata and sub blocks with their own size
-                let metadata_size = 12;
-                let sub_blocks_start = idx + 3 + metadata_size as usize;
+                const PLAINTEXT_BLOCK_SIZE: u32 = 12; // does not include arb. len. sub blocks
+                let sub_blocks_start = idx + 3 + PLAINTEXT_BLOCK_SIZE as usize;
                 let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
                 (
-                    3 + metadata_size as u32 + sub_blocks_size,
+                    3 + PLAINTEXT_BLOCK_SIZE + sub_blocks_size,
                     ExtensionType::PlainText,
                 )
             }
             0xFF => {
-                let metadata_size = 11;
-                let sub_blocks_start = idx + 3 + metadata_size as usize;
+                // application extension
+                // block size for metadata and sub blocks with their own size
+                const APPLICATION_BLOCK_SIZE: u32 = 11;
+                let sub_blocks_start = idx + 3 + APPLICATION_BLOCK_SIZE as usize;
                 let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
                 (
-                    3 + metadata_size as u32 + sub_blocks_size,
+                    3 + APPLICATION_BLOCK_SIZE + sub_blocks_size,
                     ExtensionType::Application,
                 )
             }
             _ => return Err(GifParseError::new("Invalid extension block type")),
         };
+
         self.blocks.push(Block {
             index: self.cur_index,
             size: total_size,
@@ -297,21 +300,9 @@ impl<'a> GifParser<'a> {
         let mut num_bytes: u32 = 0;
 
         let mut block_len = self.bytes[index];
-        // if index > 3075080 && block_len == 12 {
-        //     println!("{}", block_len);
-        //     println!("!! {:x?}", &self.bytes[index - 16..index + 16]);
-        // }
         while block_len != 0 {
             num_bytes += 1 + block_len as u32; // add one to include the length byte as well
             block_len = self.bytes[index + (num_bytes as usize)];
-            // if index > 3075080 {
-            //     println!("{}", block_len);
-            //     println!(
-            //         "{:x?}",
-            //         &self.bytes
-            //             [index - 16 + (num_bytes as usize)..index + 16 + (num_bytes as usize)]
-            //     );
-            // }
         }
 
         num_bytes
