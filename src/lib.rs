@@ -53,7 +53,7 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                 num_images += 1;
             } else if let Ok(img) = image::load_from_memory_with_format(&bytes[i..], format) {
                 if OUTPUT_ENABLED {
-                    img.save_with_format(
+                    if let Err(e) = img.save_with_format(
                         format!(
                             "{}/{}.{}",
                             output_folder,
@@ -61,8 +61,9 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                             format.extensions_str()[0]
                         ),
                         format,
-                    )
-                    .expect("image should save properly");
+                    ) {
+                        println!("Error when saving image: {}", e);
+                    }
                 }
                 num_images += 1;
             }
