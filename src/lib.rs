@@ -5,7 +5,7 @@ use crate::gifparser::GifParser;
 
 pub mod gifparser;
 
-const OUTPUT_ENABLED: bool = false;
+const OUTPUT_ENABLED: bool = true;
 
 #[derive(Debug)]
 pub enum Error {
