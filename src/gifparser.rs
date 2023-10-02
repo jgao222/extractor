@@ -229,7 +229,6 @@ impl<'a> GifParser<'a> {
         if self.bytes[self.cur_index as usize] != 0x0 {
             Err(GifParseError::new("Invalid extension block terminator"))
         } else {
-            // self.cur_index += 1; // advance past block terminator
             Ok(())
         }
     }
@@ -267,7 +266,6 @@ impl<'a> GifParser<'a> {
                 "Invalid termination of image data blocks",
             ))
         } else {
-            // self.cur_index += 1; // advance past block terminator
             Ok(())
         }
     }
