@@ -5,7 +5,7 @@ use crate::gifparser::GifParser;
 
 pub mod gifparser;
 
-const OUTPUT_ENABLED: bool = true;
+const OUTPUT_ENABLED: bool = false;
 
 #[derive(Debug)]
 pub enum Error {
@@ -44,6 +44,7 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                     continue; // so ignore until we actually get to the header
                 }
                 // if num_images == 345 {
+                println!("Image {} starting at byte index {}", num_images, i);
                 if let Err(e) =
                     find_and_write_gif(&bytes, i, format!("{}{}.gif", output_folder, num_images))
                 {

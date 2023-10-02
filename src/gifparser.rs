@@ -19,10 +19,18 @@ pub enum GifBlockType {
     Header,
     LogicalScreenDescriptor,
     ColorTable,
-    Extension,
+    Extension(ExtensionType),
     ImageDescriptor,
     ImageData,
     Trailer,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExtensionType {
+    GraphicControl,
+    Comment,
+    PlainText,
+    Application,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +84,9 @@ impl<'a> GifParser<'a> {
         // and ; the trailing byte
         loop {
             let idx = self.cur_index as usize;
+            if idx >= self.bytes.len() {
+                return Err(GifParseError::new("Ran out of bytes while parsing GIF!"));
+            }
             match bytes[idx] {
                 b'!' => {
                     // 0x21
@@ -91,7 +102,7 @@ impl<'a> GifParser<'a> {
                         self.bytes[(self.blocks.last().unwrap().index + 9) as usize];
                     if image_descriptor_packed_byte & FIRST_BIT_MASK != 0 {
                         // local color table exists
-                        let local_color_table_size = logical_packed_byte & SIZE_BYTES_MASK; // number of entries
+                        let local_color_table_size = image_descriptor_packed_byte & SIZE_BYTES_MASK; // number of entries
 
                         // see above when getting size of global color table
                         let local_color_table_bytes = 3 * (2 << (local_color_table_size));
@@ -115,9 +126,10 @@ impl<'a> GifParser<'a> {
                 } // people be adding weird padding sometimes?
                 byte => {
                     println!(
-                    "encountered GIF byte {:x?} that isn't a block starter! blocks so far {:?}\n Index {} surrounding bytes {:x?}",
-                    byte, self.blocks, idx, &self.bytes[(idx - 16)..(idx + 16)]
+                    "encountered GIF byte {:x?} that isn't a block starter! blocks so far {}\n Index {} surrounding bytes {:x?}",
+                    byte, self.blocks.len(), idx, &self.bytes[(idx - 16)..(idx + 16)]
                     );
+                    println!("{:#?}", self.blocks);
                     return Err(GifParseError {
                         message: "Invalid bytes in GIF",
                     });
@@ -186,7 +198,7 @@ impl<'a> GifParser<'a> {
         // Comment extensions only have sub blocks, extension introducer -> label byte -> sub blocks of comment data
         // they all have a zero byte block terminator that we should check though
         let idx = self.cur_index as usize;
-        let total_size = match self.bytes[idx + 1] {
+        let (total_size, ext_type) = match self.bytes[idx + 1] {
             0xF9 => {
                 // graphic control extension
                 // only block size
@@ -194,14 +206,14 @@ impl<'a> GifParser<'a> {
                 let block_size = 4; // TODO I changed this to hardcoded since it is/should be fixed, but not sure about implication
 
                 // three extra bytes since introducer, label, and size aren't included in the size
-                3 + block_size as u32
+                (3 + block_size as u32, ExtensionType::GraphicControl)
             }
             0xFE => {
                 // comment data extension
                 // only sub blocks
                 let data_size = self.length_of_sub_blocks(idx + 2);
                 // extension introducer byte and label byte
-                2 + data_size
+                (2 + data_size, ExtensionType::Comment)
             }
             0x01 => {
                 // plain text and application extension have
@@ -209,20 +221,26 @@ impl<'a> GifParser<'a> {
                 let metadata_size = 12;
                 let sub_blocks_start = idx + 3 + metadata_size as usize;
                 let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
-                3 + metadata_size as u32 + sub_blocks_size
+                (
+                    3 + metadata_size as u32 + sub_blocks_size,
+                    ExtensionType::PlainText,
+                )
             }
             0xFF => {
                 let metadata_size = 11;
                 let sub_blocks_start = idx + 3 + metadata_size as usize;
                 let sub_blocks_size = self.length_of_sub_blocks(sub_blocks_start);
-                3 + metadata_size as u32 + sub_blocks_size
+                (
+                    3 + metadata_size as u32 + sub_blocks_size,
+                    ExtensionType::Application,
+                )
             }
             _ => return Err(GifParseError::new("Invalid extension block type")),
         };
         self.blocks.push(Block {
             index: self.cur_index,
             size: total_size,
-            block_type: GifBlockType::Extension,
+            block_type: GifBlockType::Extension(ext_type),
         });
         self.cur_index += total_size;
 
