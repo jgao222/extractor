@@ -43,8 +43,7 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
                 if !&bytes[i..].starts_with(&GIF_HEADER) {
                     continue; // so ignore until we actually get to the header
                 }
-                // if num_images == 345 {
-                println!("Image {} starting at byte index {}", num_images, i);
+
                 if let Err(e) =
                     find_and_write_gif(&bytes, i, format!("{}{}.gif", output_folder, num_images))
                 {
@@ -76,7 +75,6 @@ pub fn extract_images(filename: &String, output_folder: &String) -> Result<(), E
 }
 
 fn find_and_write_gif(bytes: &[u8], index: usize, filename: String) -> Result<(), Error> {
-    println!("Writing {}", &filename);
     let start_idx = index;
     let mut parser = GifParser::new();
     let blocks = parser
@@ -86,13 +84,12 @@ fn find_and_write_gif(bytes: &[u8], index: usize, filename: String) -> Result<()
 
     if OUTPUT_ENABLED {
         let mut manual_output_file =
-            fs::File::create(&filename).expect("should be able to create a file");
+            fs::File::create(filename).expect("should be able to create a file");
 
         manual_output_file
             .write_all(&bytes[start_idx..end_idx]) // +1 to include the trailer byte
             .expect("should be able to write segement to disk");
     }
 
-    println!("Wrote {} bytes", end_idx - start_idx);
     Ok(())
 }
